@@ -28,6 +28,14 @@ import org.apache.camel.zipkin.ZipkinLoggingSpanCollector;
 import org.apache.camel.zipkin.ZipkinTracer;
 import org.junit.Test;
 
+/**
+ * Integration test requires running Zipkin/Scribe running
+ *
+ * The easiest way is to run using zipkin-docker: https://github.com/openzipkin/docker-zipkin
+ *
+ * Adjust the IP address to what IP docker-machines have assigned, you can use
+ * <tt>docker-machines ls</tt>
+ */
 public class ZipkinABCRouteScribe extends CamelTestSupport {
 
     private String ip = "192.168.99.100";

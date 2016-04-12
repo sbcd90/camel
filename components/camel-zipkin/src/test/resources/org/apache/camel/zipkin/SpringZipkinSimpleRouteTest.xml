@@ -15,19 +15,30 @@
     See the License for the specific language governing permissions and
     limitations under the License.
 -->
-<!-- START SNIPPET: ex -->
 <beans xmlns="http://www.springframework.org/schema/beans"
        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-       xmlns:context="http://www.springframework.org/schema/context"
        xsi:schemaLocation="
-         http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
-         http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
+       http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd
+    ">
 
-  <!-- first, define your individual @Configuration classes as beans -->
-  <bean class="org.apache.camel.example.spring.javaconfig.MyRouteConfig"/>
+  <!-- to use a logger as the collector (for testing) -->
+  <bean id="logSpanCollector" class="org.apache.camel.zipkin.ZipkinLoggingSpanCollector"/>
 
-  <!-- be sure the configure class to be processed -->
-  <context:annotation-config/>
+  <!-- setup zipkin tracer -->
+  <bean id="zipkinTracer" class="org.apache.camel.zipkin.ZipkinTracer">
+    <property name="serviceName" value="dude"/>
+    <property name="spanCollector" ref="logSpanCollector"/>
+  </bean>
+
+  <camelContext xmlns="http://camel.apache.org/schema/spring">
+    <route id="dude">
+      <from uri="seda:dude"/>
+      <log message="Routing at ${routeId}"/>
+      <delay>
+        <simple>${random(1000,2000)}</simple>
+      </delay>
+    </route>
+  </camelContext>
 
 </beans>
-  <!-- END SNIPPET: ex -->

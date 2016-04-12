@@ -236,6 +236,14 @@ public class RestDefinition extends OptionalIdentifiedDefinition<RestDefinition>
         return addVerb("put", uri);
     }
 
+    public RestDefinition patch() {
+        return addVerb("patch", null);
+    }
+
+    public RestDefinition patch(String uri) {
+        return addVerb("patch", uri);
+    }
+
     public RestDefinition delete() {
         return addVerb("delete", null);
     }
@@ -564,6 +572,8 @@ public class RestDefinition extends OptionalIdentifiedDefinition<RestDefinition>
             answer = new HeadVerbDefinition();
         } else if ("put".equals(verb)) {
             answer = new PutVerbDefinition();
+        } else if ("patch".equals(verb)) {
+            answer = new PatchVerbDefinition();
         } else if ("options".equals(verb)) {
             answer = new OptionsVerbDefinition();
         } else {
@@ -697,7 +707,7 @@ public class RestDefinition extends OptionalIdentifiedDefinition<RestDefinition>
             }
             // register all the default values for the query parameters
             for (RestOperationParamDefinition param : verb.getParams()) {
-                if (RestParamType.query == param.getType() && param.getDefaultValue() != null) {
+                if (RestParamType.query == param.getType() && ObjectHelper.isNotEmpty(param.getDefaultValue())) {
                     binding.addDefaultValue(param.getName(), param.getDefaultValue());
                 }
             }

@@ -28,8 +28,11 @@ import com.github.kristofa.brave.SpanId;
 import com.github.kristofa.brave.internal.Nullable;
 import org.apache.camel.Endpoint;
 import org.apache.camel.Exchange;
+import org.apache.camel.StreamCache;
 import org.apache.camel.util.MessageHelper;
 import org.apache.camel.util.URISupport;
+
+import static org.apache.camel.zipkin.ZipkinHelper.prepareBodyForLogging;
 
 public final class ZipkinClientRequestAdapter implements ClientRequestAdapter {
 
@@ -80,9 +83,14 @@ public final class ZipkinClientRequestAdapter implements ClientRequestAdapter {
         KeyValueAnnotation key3 = KeyValueAnnotation.create("camel.client.exchange.pattern", exchange.getPattern().name());
 
         KeyValueAnnotation key4 = null;
-        if (eventNotifier.isIncludeMessageBody()) {
-            String body = MessageHelper.extractBodyForLogging(exchange.hasOut() ? exchange.getOut() : exchange.getIn(), "");
+        if (eventNotifier.isIncludeMessageBody() || eventNotifier.isIncludeMessageBodyStreams()) {
+            boolean streams = eventNotifier.isIncludeMessageBodyStreams();
+            StreamCache cache = prepareBodyForLogging(exchange, streams);
+            String body = MessageHelper.extractBodyForLogging(exchange.hasOut() ? exchange.getOut() : exchange.getIn(), "", streams, streams);
             key4 = KeyValueAnnotation.create("camel.client.exchange.message.request.body", body);
+            if (cache != null) {
+                cache.reset();
+            }
         }
 
         List<KeyValueAnnotation> list = new ArrayList<>();

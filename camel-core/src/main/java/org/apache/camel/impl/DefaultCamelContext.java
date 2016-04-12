@@ -39,6 +39,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 import javax.naming.Context;
@@ -157,6 +158,7 @@ import org.apache.camel.util.IntrospectionSupport;
 import org.apache.camel.util.JsonSchemaHelper;
 import org.apache.camel.util.LoadPropertiesException;
 import org.apache.camel.util.ObjectHelper;
+import org.apache.camel.util.OrderedComparator;
 import org.apache.camel.util.ServiceHelper;
 import org.apache.camel.util.StopWatch;
 import org.apache.camel.util.StringHelper;
@@ -185,7 +187,7 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
     private final Map<String, Component> components = new HashMap<String, Component>();
     private final Set<Route> routes = new LinkedHashSet<Route>();
     private final List<Service> servicesToStop = new CopyOnWriteArrayList<Service>();
-    private final Set<StartupListener> startupListeners = new LinkedHashSet<StartupListener>();
+    private final List<StartupListener> startupListeners = new CopyOnWriteArrayList<StartupListener>();
     private final DeferServiceStartupListener deferStartupListener = new DeferServiceStartupListener();
     private TypeConverter typeConverter;
     private TypeConverterRegistry typeConverterRegistry;
@@ -213,6 +215,7 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
     private Boolean autoStartup = Boolean.TRUE;
     private Boolean trace = Boolean.FALSE;
     private Boolean messageHistory = Boolean.TRUE;
+    private Boolean logExhaustedMessageBody = Boolean.FALSE;
     private Boolean streamCache = Boolean.FALSE;
     private Boolean handleFault = Boolean.FALSE;
     private Boolean disableJMX = Boolean.FALSE;
@@ -276,7 +279,7 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
         // create endpoint registry at first since end users may access endpoints before CamelContext is started
         this.endpoints = new DefaultEndpointRegistry(this);
 
-        // add the derfer service startup listener
+        // add the defer service startup listener
         this.startupListeners.add(deferStartupListener);
 
         // use WebSphere specific resolver if running on WebSphere
@@ -1217,10 +1220,16 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
     }
 
     public void addService(Object object, boolean stopOnShutdown) throws Exception {
-        doAddService(object, stopOnShutdown);
+        doAddService(object, stopOnShutdown, false);
     }
 
-    private void doAddService(Object object, boolean stopOnShutdown) throws Exception {
+    @Override
+    public void addService(Object object, boolean stopOnShutdown, boolean forceStart) throws Exception {
+        doAddService(object, stopOnShutdown, forceStart);
+    }
+
+    private void doAddService(Object object, boolean stopOnShutdown, boolean forceStart) throws Exception {
+
         // inject CamelContext
         if (object instanceof CamelContextAware) {
             CamelContextAware aware = (CamelContextAware) object;
@@ -1239,26 +1248,25 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
                 }
             }
 
-            // only add to services to close if its a singleton
-            // otherwise we could for example end up with a lot of prototype scope endpoints
-            boolean singleton = true; // assume singleton by default
-            if (service instanceof IsSingleton) {
-                singleton = ((IsSingleton) service).isSingleton();
-            }
-            // do not add endpoints as they have their own list
-            if (singleton && !(service instanceof Endpoint)) {
-                // only add to list of services to stop if its not already there
-                if (stopOnShutdown && !hasService(service)) {
-                    servicesToStop.add(service);
+            if (!forceStart) {
+                // now start the service (and defer starting if CamelContext is starting up itself)
+                deferStartService(object, stopOnShutdown);
+            } else {
+                // only add to services to close if its a singleton
+                // otherwise we could for example end up with a lot of prototype scope endpoints
+                boolean singleton = true; // assume singleton by default
+                if (object instanceof IsSingleton) {
+                    singleton = ((IsSingleton) service).isSingleton();
                 }
+                // do not add endpoints as they have their own list
+                if (singleton && !(service instanceof Endpoint)) {
+                    // only add to list of services to stop if its not already there
+                    if (stopOnShutdown && !hasService(service)) {
+                        servicesToStop.add(service);
+                    }
+                }
+                ServiceHelper.startService(service);
             }
-        }
-
-        // and then ensure service is started (as stated in the javadoc)
-        if (object instanceof Service) {
-            startService((Service)object);
-        } else if (object instanceof Collection<?>) {
-            startServices((Collection<?>)object);
         }
     }
 
@@ -2338,8 +2346,8 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
                 // of the camel context (its the container)
                 typeConverter = createTypeConverter();
                 try {
-                    // must add service eager
-                    addService(typeConverter);
+                    // must add service eager and force start it
+                    addService(typeConverter, true, true);
                 } catch (Exception e) {
                     throw ObjectHelper.wrapRuntimeCamelException(e);
                 }
@@ -2351,8 +2359,8 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
     public void setTypeConverter(TypeConverter typeConverter) {
         this.typeConverter = typeConverter;
         try {
-            // must add service eager
-            addService(typeConverter);
+            // must add service eager and force start it
+            addService(typeConverter, true, true);
         } catch (Exception e) {
             throw ObjectHelper.wrapRuntimeCamelException(e);
         }
@@ -2609,6 +2617,14 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
 
     public void setMessageHistory(Boolean messageHistory) {
         this.messageHistory = messageHistory;
+    }
+
+    public Boolean isLogExhaustedMessageBody() {
+        return logExhaustedMessageBody;
+    }
+
+    public void setLogExhaustedMessageBody(Boolean logExhaustedMessageBody) {
+        this.logExhaustedMessageBody = logExhaustedMessageBody;
     }
 
     public Boolean isHandleFault() {
@@ -2995,23 +3011,24 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
         // re-create endpoint registry as the cache size limit may be set after the constructor of this instance was called.
         // and we needed to create endpoints up-front as it may be accessed before this context is started
         endpoints = new DefaultEndpointRegistry(this, endpoints);
-        addService(endpoints);
-        // special for executorServiceManager as want to stop it manually
-        doAddService(executorServiceManager, false);
-        addService(producerServicePool);
-        addService(pollingConsumerServicePool);
-        addService(inflightRepository);
-        addService(asyncProcessorAwaitManager);
-        addService(shutdownStrategy);
-        addService(packageScanClassResolver);
-        addService(restRegistry);
-        addService(messageHistoryFactory);
+        // add this as service and force pre-start them
+        addService(endpoints, true, true);
+        // special for executorServiceManager as want to stop it manually so false in stopOnShutdown
+        addService(executorServiceManager, false, true);
+        addService(producerServicePool, true, true);
+        addService(pollingConsumerServicePool, true, true);
+        addService(inflightRepository, true, true);
+        addService(asyncProcessorAwaitManager, true, true);
+        addService(shutdownStrategy, true, true);
+        addService(packageScanClassResolver, true, true);
+        addService(restRegistry, true, true);
+        addService(messageHistoryFactory, true, true);
 
         if (runtimeEndpointRegistry != null) {
             if (runtimeEndpointRegistry instanceof EventNotifier) {
                 getManagementStrategy().addEventNotifier((EventNotifier) runtimeEndpointRegistry);
             }
-            addService(runtimeEndpointRegistry);
+            addService(runtimeEndpointRegistry, true, true);
         }
 
         // eager lookup any configured properties component to avoid subsequent lookup attempts which may impact performance
@@ -3053,7 +3070,7 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
         if (streamCachingInUse) {
             // stream caching is in use so enable the strategy
             getStreamCachingStrategy().setEnabled(true);
-            addService(getStreamCachingStrategy());
+            addService(getStreamCachingStrategy(), true, true);
         } else {
             // log if stream caching is not in use as this can help people to enable it if they use streams
             log.info("StreamCaching is not in use. If using streams then its recommended to enable stream caching."
@@ -3207,20 +3224,9 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
                 }
             }
 
-            if (!filtered.isEmpty()) {
-                // the context is now considered started (i.e. isStarted() == true))
-                // starting routes is done after, not during context startup
-                safelyStartRouteServices(checkClash, startConsumer, resumeConsumer, addingRoutes, filtered.values());
-            }
+            // the context is in last phase of staring, so lets start the routes
+            safelyStartRouteServices(checkClash, startConsumer, resumeConsumer, addingRoutes, filtered.values());
 
-            // we are finished starting routes, so remove flag before we emit the startup listeners below
-            isStartingRoutes.remove();
-
-            // now notify any startup aware listeners as all the routes etc has been started,
-            // allowing the listeners to do custom work after routes has been started
-            for (StartupListener startup : startupListeners) {
-                startup.onCamelContextStarted(this, isStarted());
-            }
         } finally {
             isStartingRoutes.remove();
         }
@@ -3435,6 +3441,19 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
         // warm up routes before we start them
         doWarmUpRoutes(inputs, startConsumer);
 
+        // sort the startup listeners so they are started in the right order
+        Collections.sort(startupListeners, new OrderedComparator());
+        // now call the startup listeners where the routes has been warmed up
+        // (only the actual route consumer has not yet been started)
+        for (StartupListener startup : startupListeners) {
+            startup.onCamelContextStarted(this, isStarted());
+        }
+        // because the consumers may also register startup listeners we need to reset
+        // the already started listeners
+        List<StartupListener> backup = new ArrayList<>(startupListeners);
+        startupListeners.clear();
+
+        // now start the consumers
         if (startConsumer) {
             if (resumeConsumer) {
                 // and now resume the routes
@@ -3445,6 +3464,16 @@ public class DefaultCamelContext extends ServiceSupport implements ModelCamelCon
                 doStartRouteConsumers(inputs, addingRoutes);
             }
         }
+
+        // sort the startup listeners so they are started in the right order
+        Collections.sort(startupListeners, new OrderedComparator());
+        // now the consumers that was just started may also add new StartupListeners (such as timer)
+        // so we need to ensure they get started as well
+        for (StartupListener startup : startupListeners) {
+            startup.onCamelContextStarted(this, isStarted());
+        }
+        // and add the previous started startup listeners to the list so we have them all
+        startupListeners.addAll(0, backup);
 
         // inputs no longer needed
         inputs.clear();

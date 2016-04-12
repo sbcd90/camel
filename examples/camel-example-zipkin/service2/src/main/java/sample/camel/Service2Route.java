@@ -23,18 +23,25 @@ public class Service2Route extends RouteBuilder {
 
     @Override
     public void configure() throws Exception {
+        // create zipkin
         ZipkinTracer zipkin = new ZipkinTracer();
         zipkin.setHostName("192.168.99.100");
         zipkin.setPort(9410);
+        // set the service name
         zipkin.setServiceName("service2");
+        // capture 100% of all the events
+        zipkin.setRate(1.0f);
+        // include message bodies in the traces (not recommended for production)
+        zipkin.setIncludeMessageBodyStreams(true);
 
         // add zipkin to CamelContext
         zipkin.init(getContext());
 
-        from("undertow:http://0.0.0.0:7070/service2").routeId("service2")
-                .convertBodyTo(String.class)
+        from("undertow:http://0.0.0.0:7070/service2").routeId("service2").streamCaching()
+                .log(" Service2 request: ${body}")
                 .delay(simple("${random(1000,2000)}"))
-                .transform(simple("Service2: ${body}"));
+                .transform(simple("Service2-${body}"))
+                .log("Service2 response: ${body}");
     }
 
 }

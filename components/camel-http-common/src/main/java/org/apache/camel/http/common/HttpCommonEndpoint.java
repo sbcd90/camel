@@ -46,6 +46,11 @@ public abstract class HttpCommonEndpoint extends DefaultEndpoint implements Head
             description = "If the option is true, HttpProducer will ignore the Exchange.HTTP_URI header, and use the endpoint's URI for request."
                     + " You may also set the option throwExceptionOnFailure to be false to let the HttpProducer send all the fault response back.")
     boolean bridgeEndpoint;
+    @UriParam(label = "producer",
+            description = "If the option is true, HttpProducer will set the Host header to the value contained in the current exchange Host header, " +
+                    "useful in reverse proxy applications where you want the Host header received by the downstream server to reflect the URL called by the upstream client, " +
+                    "this allows applications which use the Host header to generate accurate URL's for a proxied service")
+    boolean preserveHostHeader;
     @UriParam(label = "consumer",
             description = "Whether or not the consumer should try to find a target consumer by matching the URI prefix if no exact match is found.")
     boolean matchOnUriPrefix;
@@ -100,6 +105,14 @@ public abstract class HttpCommonEndpoint extends DefaultEndpoint implements Head
             description = "Whether to eager check whether the HTTP requests has content if the content-length header is 0 or not present."
                     + " This can be turned on in case HTTP clients do not send streamed data.")
     boolean eagerCheckContentAvailable;
+    @UriParam(label = "advanced", defaultValue = "true",
+            description = "If this option is true then IN exchange Body of the exchange will be mapped to HTTP body." 
+            + " Setting this to false will avoid the HTTP mapping.")
+    boolean mapHttpMessageBody = true;
+    @UriParam(label = "advanced", defaultValue = "true",
+            description = "If this option is true then IN exchange Headers of the exchange will be mapped to HTTP headers."
+            + " Setting this to false will avoid the HTTP Headers mapping.")
+    boolean mapHttpMessageHeaders = true;
     @UriParam(label = "producer", defaultValue = "200-299",
             description = "The status codes which is considered a success response. The values are inclusive. The range must be defined as from-to with the dash included.")
     private String okStatusCodeRange = "200-299";
@@ -169,6 +182,8 @@ public abstract class HttpCommonEndpoint extends DefaultEndpoint implements Head
                 httpBinding.setAllowJavaSerializedObject(getComponent().isAllowJavaSerializedObject());
             }
             httpBinding.setEagerCheckContentAvailable(isEagerCheckContentAvailable());
+            httpBinding.setMapHttpMessageBody(isMapHttpMessageBody());
+            httpBinding.setMapHttpMessageHeaders(isMapHttpMessageHeaders());
         }
         return httpBinding;
     }
@@ -244,6 +259,19 @@ public abstract class HttpCommonEndpoint extends DefaultEndpoint implements Head
      */
     public void setBridgeEndpoint(boolean bridge) {
         this.bridgeEndpoint = bridge;
+    }
+
+    public boolean isPreserveHostHeader() {
+        return preserveHostHeader;
+    }
+
+    /**
+     * If the option is true, HttpProducer will set the Host header to the value contained in the current exchange Host header,
+     * useful in reverse proxy applications where you want the Host header received by the downstream server to reflect the URL called by the upstream client,
+     * this allows applications which use the Host header to generate accurate URL's for a proxied service
+     */
+    public void setPreserveHostHeader(boolean preserveHostHeader) {
+        this.preserveHostHeader = preserveHostHeader;
     }
 
     public boolean isMatchOnUriPrefix() {
@@ -446,4 +474,25 @@ public abstract class HttpCommonEndpoint extends DefaultEndpoint implements Head
         this.okStatusCodeRange = okStatusCodeRange;
     }
 
+    public boolean isMapHttpMessageBody() {
+        return mapHttpMessageBody;
+    }
+
+    /**
+     * If this option is true, the IN exchange body will be mapped to HTTP
+     */
+    public void setMapHttpMessageBody(boolean mapHttpMessageBody) {
+        this.mapHttpMessageBody = mapHttpMessageBody;
+    }
+
+    public boolean isMapHttpMessageHeaders() {
+        return mapHttpMessageHeaders;
+    }
+
+    /**
+     * If this option is true, the IN exchange headers will be mapped to HTTP Headers
+     */
+    public void setMapHttpMessageHeaders(boolean mapHttpMessageHeaders) {
+        this.mapHttpMessageHeaders = mapHttpMessageHeaders;
+    }
 }
